@@ -1,5 +1,6 @@
 use parc_proof::{
-    Continuity, ProofBuilder, SigningMetadata, Subject, SubjectType, MIN_CHALLENGE_BYTES,
+    BuildError, Continuity, ContinuityEdge, ContinuityEvent, EvidenceRecord, EvidenceStatus,
+    Producer, ProofBuilder, SigningMetadata, Subject, SubjectType, MIN_CHALLENGE_BYTES,
 };
 
 fn minimal_builder() -> ProofBuilder {
@@ -18,6 +19,24 @@ fn minimal_builder() -> ProofBuilder {
             algorithm: "none-for-test".into(),
             credential_refs: vec![],
         })
+}
+
+fn evidence(id: &str, dependencies: &[&str]) -> EvidenceRecord {
+    EvidenceRecord {
+        id: id.into(),
+        kind: "parc.test".into(),
+        producer: Producer {
+            id: "test".into(),
+            boundary: "test".into(),
+            mediation: None,
+        },
+        status: EvidenceStatus::Present,
+        observed_at: None,
+        digest: None,
+        claims: serde_json::Map::new(),
+        dependencies: dependencies.iter().map(|value| (*value).into()).collect(),
+        limitations: vec![],
+    }
 }
 
 #[test]
@@ -47,4 +66,51 @@ fn rejects_short_challenge() {
         .expect_err("short challenge must fail");
 
     assert!(error.to_string().contains("challenge length"));
+}
+
+#[test]
+fn rejects_evidence_dependency_cycle() {
+    let error = minimal_builder()
+        .evidence(evidence("e1", &["e2"]))
+        .evidence(evidence("e2", &["e1"]))
+        .build()
+        .expect_err("cycle must fail");
+    assert_eq!(error, BuildError::CyclicEvidenceDependencies);
+}
+
+#[test]
+fn rejects_continuity_cycle() {
+    let continuity = Continuity {
+        events: vec![
+            ContinuityEvent {
+                id: "a".into(),
+                kind: "test".into(),
+                asserted_by: "test".into(),
+                sequence: Some(1),
+            },
+            ContinuityEvent {
+                id: "b".into(),
+                kind: "test".into(),
+                asserted_by: "test".into(),
+                sequence: Some(2),
+            },
+        ],
+        edges: vec![
+            ContinuityEdge {
+                before: "a".into(),
+                after: "b".into(),
+                maximum_interval_ms: None,
+            },
+            ContinuityEdge {
+                before: "b".into(),
+                after: "a".into(),
+                maximum_interval_ms: None,
+            },
+        ],
+    };
+    let error = minimal_builder()
+        .continuity(continuity)
+        .build()
+        .expect_err("cycle must fail");
+    assert_eq!(error, BuildError::CyclicContinuity);
 }

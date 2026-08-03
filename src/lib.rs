@@ -3,7 +3,7 @@
 //! This crate does not implement signing, key attestation, or relying-party
 //! policy. Callers must provide reviewed cryptographic and platform adapters.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -178,6 +178,8 @@ pub enum BuildError {
     EmptyProofId,
     #[error("subject value must not be empty")]
     EmptySubject,
+    #[error("challenge encoding is invalid")]
+    InvalidChallengeEncoding,
     #[error("challenge length {actual} is outside {min}..={max} bytes")]
     InvalidChallengeLength { actual: usize, min: usize, max: usize },
     #[error("issuedAt and expiresAt must not be empty")]
@@ -186,10 +188,14 @@ pub enum BuildError {
     DuplicateEvidenceId(String),
     #[error("evidence {record} depends on missing evidence {dependency}")]
     MissingEvidenceDependency { record: String, dependency: String },
+    #[error("evidence dependency graph contains a cycle")]
+    CyclicEvidenceDependencies,
     #[error("duplicate continuity event id: {0}")]
     DuplicateContinuityEvent(String),
     #[error("continuity edge references missing event: {0}")]
     MissingContinuityEvent(String),
+    #[error("continuity graph contains a cycle")]
+    CyclicContinuity,
     #[error("signing format and algorithm must not be empty")]
     MissingSigningMetadata,
     #[error("serialization failed: {0}")]
@@ -209,11 +215,7 @@ impl ProofEnvelope {
         }
         let challenge = URL_SAFE_NO_PAD
             .decode(self.challenge.as_bytes())
-            .map_err(|_| BuildError::InvalidChallengeLength {
-                actual: 0,
-                min: MIN_CHALLENGE_BYTES,
-                max: MAX_CHALLENGE_BYTES,
-            })?;
+            .map_err(|_| BuildError::InvalidChallengeEncoding)?;
         if !(MIN_CHALLENGE_BYTES..=MAX_CHALLENGE_BYTES).contains(&challenge.len()) {
             return Err(BuildError::InvalidChallengeLength {
                 actual: challenge.len(),
@@ -247,6 +249,10 @@ fn validate_evidence(records: &[EvidenceRecord]) -> Result<(), BuildError> {
             return Err(BuildError::DuplicateEvidenceId(record.id.clone()));
         }
     }
+
+    let mut indegree: HashMap<&str, usize> = ids.iter().map(|id| (*id, 0)).collect();
+    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut unique_edges = HashSet::new();
     for record in records {
         for dependency in &record.dependencies {
             if !ids.contains(dependency.as_str()) {
@@ -255,7 +261,15 @@ fn validate_evidence(records: &[EvidenceRecord]) -> Result<(), BuildError> {
                     dependency: dependency.clone(),
                 });
             }
+            let edge = (dependency.as_str(), record.id.as_str());
+            if unique_edges.insert(edge) {
+                *indegree.get_mut(record.id.as_str()).expect("known evidence id") += 1;
+                dependents.entry(dependency.as_str()).or_default().push(record.id.as_str());
+            }
         }
+    }
+    if !is_acyclic(&mut indegree, &dependents) {
+        return Err(BuildError::CyclicEvidenceDependencies);
     }
     Ok(())
 }
@@ -267,6 +281,10 @@ fn validate_continuity(continuity: &Continuity) -> Result<(), BuildError> {
             return Err(BuildError::DuplicateContinuityEvent(event.id.clone()));
         }
     }
+
+    let mut indegree: HashMap<&str, usize> = ids.iter().map(|id| (*id, 0)).collect();
+    let mut successors: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut unique_edges = HashSet::new();
     for edge in &continuity.edges {
         if !ids.contains(edge.before.as_str()) {
             return Err(BuildError::MissingContinuityEvent(edge.before.clone()));
@@ -274,8 +292,40 @@ fn validate_continuity(continuity: &Continuity) -> Result<(), BuildError> {
         if !ids.contains(edge.after.as_str()) {
             return Err(BuildError::MissingContinuityEvent(edge.after.clone()));
         }
+        let relation = (edge.before.as_str(), edge.after.as_str());
+        if unique_edges.insert(relation) {
+            *indegree.get_mut(edge.after.as_str()).expect("known continuity event") += 1;
+            successors.entry(edge.before.as_str()).or_default().push(edge.after.as_str());
+        }
+    }
+    if !is_acyclic(&mut indegree, &successors) {
+        return Err(BuildError::CyclicContinuity);
     }
     Ok(())
+}
+
+fn is_acyclic<'a>(
+    indegree: &mut HashMap<&'a str, usize>,
+    successors: &HashMap<&'a str, Vec<&'a str>>,
+) -> bool {
+    let mut queue: VecDeque<&str> = indegree
+        .iter()
+        .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+        .collect();
+    let mut visited = 0;
+    while let Some(id) = queue.pop_front() {
+        visited += 1;
+        if let Some(next) = successors.get(id) {
+            for successor in next {
+                let degree = indegree.get_mut(successor).expect("known graph node");
+                *degree -= 1;
+                if *degree == 0 {
+                    queue.push_back(successor);
+                }
+            }
+        }
+    }
+    visited == indegree.len()
 }
 
 #[derive(Debug, Default)]
