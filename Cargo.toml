@@ -1,0 +1,17 @@
+[package]
+name = "parc-proof"
+version = "0.1.0-alpha.1"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+description = "Experimental PARC proof data model and builder"
+repository = "https://github.com/nullweave-lab/parc-proof"
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+pretty_assertions = "1"
