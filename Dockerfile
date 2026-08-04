@@ -1,4 +1,4 @@
-FROM rust:1.82-bookworm AS build
+FROM rust:1.97-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --release --bin parc-attester
