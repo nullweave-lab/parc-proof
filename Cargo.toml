@@ -1,17 +1,29 @@
 [package]
 name = "parc-proof"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
-description = "Experimental PARC proof data model and builder"
+description = "Runnable experimental PARC proof builder and attester CLI"
 repository = "https://github.com/nullweave-lab/parc-proof"
 
+[[bin]]
+name = "parc-attester"
+path = "src/bin/attester.rs"
+
 [dependencies]
+anyhow = "1"
 base64 = "0.22"
+clap = { version = "4.5", features = ["derive", "env"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
 
 [dev-dependencies]
 pretty_assertions = "1"
+tempfile = "3"

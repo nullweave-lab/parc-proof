@@ -1,0 +1,5 @@
+target
+.git
+.github
+*.log
+parc-demo-key.json

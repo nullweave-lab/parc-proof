@@ -4,14 +4,27 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  test-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-targets
+      - run: cargo build --release --bin parc-attester
+      - run: target/release/parc-attester --help
+      - run: target/release/parc-attester keygen --key-file /tmp/parc-demo-key.json
+      - run: test -s /tmp/parc-demo-key.json
+      - run: docker build --tag parc-attester:ci .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parc-attester-linux-x86_64
+          path: target/release/parc-attester
+          if-no-files-found: error
+          retention-days: 14
